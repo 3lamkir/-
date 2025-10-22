@@ -236,7 +236,7 @@ class GardenStockBot:
             'accept-language': 'en-US,en;q=0.9',
             'content-type': 'application/json',
             'priority': 'u=1, i',
-            'referer': 'https://growagarden.gg/stocks',
+            'referer': 'https://growagardengame.com/stock',
             'trpc-accept': 'application/json',
             'x-trpc-source': 'gag',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
