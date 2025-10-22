@@ -87,9 +87,22 @@ class GardenStockBot:
                 logger.info(f"⏰ Интервал проверки: {self.check_interval} сек.")
                 return items
             else:
-                # Создаем файл по умолчанию
+                # Создаем файл по умолчанию с предметами из p.txt
                 default_data = {
-                    "tracked_items": ["corn", "cacao", "tomato", "carrot", "potato", "onion", "pumpkin"],
+                    "tracked_items": [
+                        "carrot", "strawberry", "blueberry", "orange tulip", "tomato", 
+                        "corn", "daffodil", "watermelon", "pumpkin", "apple", "bamboo", 
+                        "coconut", "cactus", "dragon fruit", "mango", "grape", "mushroom", 
+                        "pepper", "cacao", "beanstalk", "ember lily", "sugar apple", 
+                        "burning bud", "giant pinecone", "elder strawberry", "romanesco", 
+                        "crimson thorn", "watering can", "trowel", "recall wrench", 
+                        "basic sprinkler", "advanced sprinkler", "godly sprinkler", 
+                        "magnifying glass", "tanning mirror", "master sprinkler", 
+                        "cleaning spray", "favorite tool", "harvest tool", "friendship pot", 
+                        "grantmaster sprinkler", "level lollipop", "common egg", 
+                        "uncommon egg", "rare egg", "legendary egg", "mythical egg", 
+                        "bug egg", "jungle egg"
+                    ],
                     "settings": {
                         "check_interval": 30,
                         "notify_all_items": False,
@@ -97,21 +110,21 @@ class GardenStockBot:
                     },
                     "metadata": {
                         "last_updated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        "total_items": 7
+                        "total_items": 49
                     }
                 }
                 
                 with open(PROCTOR_FILE, 'w', encoding='utf-8') as f:
                     json.dump(default_data, f, ensure_ascii=False, indent=2)
                 
-                logger.info("📝 Создан файл proctor.json с настройками по умолчанию")
+                logger.info("📝 Создан файл proctor.json с предметами из p.txt")
                 self.check_interval = 30
                 return default_data['tracked_items']
                 
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки proctor.json: {e}")
             self.check_interval = 30
-            return ["corn", "tomato"]
+            return ["carrot", "tomato", "corn"]
 
     def save_proctor_items(self, items=None):
         """Сохраняет предметы в JSON файл"""
@@ -216,52 +229,39 @@ class GardenStockBot:
         return False
 
     async def get_real_garden_stock(self):
-        """Получает данные стока из Grow A Garden API"""
+        """Get real stock data from Grow A Garden API"""
+        
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://growagarden.gg/',
-            'Origin': 'https://growagarden.gg',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin'
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'content-type': 'application/json',
+            'priority': 'u=1, i',
+            'referer': 'https://growagarden.gg/stocks',
+            'trpc-accept': 'application/json',
+            'x-trpc-source': 'gag',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
         try:
-            # Пробуем разные эндпоинты API
-            endpoints = [
-                'https://growagarden.gg/api/stock',
-                'https://growagarden.gg/api/market',
-                'https://growagarden.gg/api/items'
-            ]
-            
-            timeout = aiohttp.ClientTimeout(total=20)
-            
+            timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                for endpoint in endpoints:
-                    try:
-                        logger.info(f"🔍 Пробуем эндпоинт: {endpoint}")
-                        async with session.get(endpoint) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                logger.info(f"✅ Успешно получены данные с {endpoint}")
-                                parsed_data = self.parse_stock_data(data)
-                                if parsed_data:
-                                    return parsed_data
-                            else:
-                                logger.warning(f"⚠️ Эндпоинт {endpoint} вернул статус {response.status}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Ошибка с эндпоинтом {endpoint}: {e}")
-                        continue
-                
-                # Если все эндпоинты не сработали, возвращаем пустой словарь
-                logger.error("❌ Все эндпоинты API не сработали")
-                return {}
-                
+                async with session.get('https://growagarden.gg/api/stock') as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(f"✅ Успешно получены данные API")
+                        
+                        # Сохраняем сырые данные для отладки
+                        try:
+                            with open('debug_stock.json', 'w', encoding='utf-8') as f:
+                                json.dump(data, f, indent=2, ensure_ascii=False)
+                            logger.info("💾 Сырые данные сохранены в debug_stock.json")
+                        except:
+                            pass
+                        
+                        return self.parse_stock_data(data)
+                    else:
+                        logger.error(f"❌ Ошибка API: {response.status}")
+                        return {}
         except asyncio.TimeoutError:
             logger.error("❌ Таймаут при запросе к API")
             return {}
@@ -270,57 +270,35 @@ class GardenStockBot:
             return {}
 
     def parse_stock_data(self, data):
-        """Парсит данные стока"""
+        """Парсит данные стока - УПРОЩЕННАЯ ВЕРСИЯ"""
         stock_items = {}
         
         try:
-            logger.info(f"🔍 Начинаем парсинг данных... Тип данных: {type(data)}")
+            logger.info(f"🔍 Начинаем парсинг данных API...")
             
-            # Функция для рекурсивного поиска items в данных
-            def find_items(obj, path=""):
-                if isinstance(obj, dict):
-                    # Проверяем ключи, которые могут содержать items
-                    for key, value in obj.items():
-                        if key.lower() in ['items', 'stock', 'products', 'data']:
-                            result = find_items(value, f"{path}.{key}")
-                            if result:
-                                return result
-                        elif isinstance(value, (dict, list)):
-                            result = find_items(value, f"{path}.{key}")
-                            if result:
-                                return result
-                    return None
-                elif isinstance(obj, list):
-                    # Если это список, проверяем каждый элемент
-                    for i, item in enumerate(obj):
-                        if isinstance(item, dict):
-                            # Проверяем есть ли нужные поля
-                            if 'name' in item and 'quantity' in item:
-                                return obj
-                            elif 'title' in item and 'stock' in item:
-                                return obj
-                        result = find_items(item, f"{path}[{i}]")
-                        if result:
-                            return result
-                    return None
-                return None
-
-            # Ищем items в данных
-            items_data = find_items(data)
-            if items_data is None:
-                items_data = data  # Используем исходные данные если не нашли items
-
-            if isinstance(items_data, list):
-                stock_list = items_data
-            elif isinstance(items_data, dict) and 'data' in items_data:
-                stock_list = items_data['data']
-            elif isinstance(items_data, dict) and 'result' in items_data:
-                stock_list = items_data['result']
-            else:
-                stock_list = [items_data] if items_data else []
-
+            # Пробуем разные возможные структуры ответа
+            stock_list = None
+            
+            if isinstance(data, list):
+                stock_list = data
+            elif isinstance(data, dict):
+                if 'result' in data and 'data' in data['result']:
+                    stock_list = data['result']['data']
+                elif 'data' in data:
+                    stock_list = data['data']
+            
             if not stock_list:
-                logger.warning("⚠️ Данные стока пусты")
+                logger.warning("⚠️ Не найдена структура с данными стока")
+                # Попробуем найти items в любой структуре
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            if isinstance(value[0], dict) and 'name' in value[0]:
+                                stock_list = value
+                                break
+            
+            if not stock_list:
+                logger.error("❌ Не удалось найти данные стока в ответе API")
                 return {}
                 
             logger.info(f"📊 Обрабатываем {len(stock_list)} элементов стока")
@@ -328,26 +306,31 @@ class GardenStockBot:
             found_count = 0
             for item in stock_list:
                 try:
-                    # Пробуем разные варианты ключей для имени
-                    name = None
-                    quantity = 0
-                    
-                    if isinstance(item, dict):
-                        for key in ['name', 'title', 'product', 'item']:
-                            if key in item and item[key]:
-                                name = str(item[key]).lower().strip()
-                                break
+                    if not isinstance(item, dict):
+                        continue
                         
-                        # Пробуем разные варианты ключей для количества
-                        for qty_key in ['quantity', 'stock', 'count', 'amount', 'qty']:
-                            if qty_key in item:
-                                try:
-                                    quantity = int(item[qty_key])
-                                    break
-                                except (ValueError, TypeError):
-                                    continue
+                    # Получаем название предмета
+                    name = None
+                    for name_key in ['name', 'title', 'itemName']:
+                        if name_key in item and item[name_key]:
+                            name = str(item[name_key]).lower().strip()
+                            break
                     
-                    if name and name in self.proctor_items and quantity > 0:
+                    if not name:
+                        continue
+                    
+                    # Получаем количество
+                    quantity = 0
+                    for qty_key in ['quantity', 'stock', 'count', 'amount', 'qty', 'stockQuantity']:
+                        if qty_key in item:
+                            try:
+                                quantity = int(item[qty_key])
+                                break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    # Проверяем, отслеживается ли предмет и есть ли в наличии
+                    if name in self.proctor_items and quantity > 0:
                         stock_items[name] = quantity
                         found_count += 1
                         logger.info(f"🎯 Найден отслеживаемый предмет: {name} - {quantity} шт.")
@@ -412,16 +395,6 @@ class GardenStockBot:
         for channel_id, channel_info in list(self.approved_channels.items()):
             try:
                 logger.info(f"🔄 Пытаемся отправить в канал: {channel_info['title']} (ID: {channel_id})")
-                
-                # Пробуем отправить тестовое сообщение сначала
-                try:
-                    await application.bot.send_message(
-                        chat_id=channel_id, 
-                        text="🔔 *Garden Stock Bot подключен!* Ожидайте уведомлений о новых предметах...",
-                        parse_mode='Markdown'
-                    )
-                except:
-                    pass
                 
                 # Отправляем основное сообщение
                 sent_message = await application.bot.send_message(
