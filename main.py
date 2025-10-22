@@ -227,112 +227,200 @@ class GardenStockBot:
                 return True
         return False
 
-    async def get_real_garden_stock(self):
-        """Get real stock data from Grow A Garden API"""
-        
-        headers = {
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'content-type': 'application/json',
-            'priority': 'u=1, i',
-            'referer': 'https://growagarden.gg/stocks',
-            'trpc-accept': 'application/json',
-            'x-trpc-source': 'gag',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        try:
-            timeout = aiohttp.ClientTimeout(total=15)
-            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                async with session.get('https://growagarden.gg/api/stock') as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"✅ Успешно получены данные API")
-                        
-                        # Сохраняем сырые данные для отладки
-                        try:
-                            with open('debug_stock.json', 'w', encoding='utf-8') as f:
-                                json.dump(data, f, indent=2, ensure_ascii=False)
-                            logger.info("💾 Сырые данные сохранены в debug_stock.json")
-                        except:
-                            pass
-                        
-                        return self.parse_stock_data(data)
-                    else:
-                        logger.error(f"❌ Ошибка API: {response.status}")
-                        return {}
-        except asyncio.TimeoutError:
-            logger.error("❌ Таймаут при запросе к API")
-            return {}
-        except Exception as e:
-            logger.error(f"❌ Ошибка получения стока: {e}")
-            return {}
+async def get_real_garden_stock(self):
+    """Get real stock data from Grow A Garden API - NEW VERSION"""
+    
+    headers = {
+        'accept': '*/*',
+        'accept-language': 'en-US,en;q=0.9',
+        'content-type': 'application/json',
+        'priority': 'u=1, i',
+        'referer': 'https://growagarden.gg/stocks',
+        'trpc-accept': 'application/json',
+        'x-trpc-source': 'gag',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+            async with session.get('https://growagarden.gg/api/stock') as response:
+                if response.status == 200:
+                    raw_data = await response.json()
+                    logger.info(f"✅ Успешно получены сырые данные API")
+                    
+                    # Сохраняем сырые данные для отладки
+                    try:
+                        with open('debug_stock_raw.json', 'w', encoding='utf-8') as f:
+                            json.dump(raw_data, f, indent=2, ensure_ascii=False)
+                        logger.info("💾 Сырые данные сохранены в debug_stock_raw.json")
+                    except:
+                        pass
+                    
+                    # Форматируем данные как в JavaScript коде
+                    formatted_data = self.format_stocks(raw_data)
+                    return self.parse_formatted_stock_data(formatted_data)
+                else:
+                    logger.error(f"❌ Ошибка API: {response.status}")
+                    return {}
+    except asyncio.TimeoutError:
+        logger.error("❌ Таймаут при запросе к API")
+        return {}
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения стока: {e}")
+        return {}
 
-    def parse_stock_data(self, data):
-        """Парсит данные стока по новой структуре API"""
-        stock_items = {}
+def format_items(self, items, image_data=None, is_last_seen=False):
+    """Форматирует items как в JavaScript коде"""
+    if not isinstance(items, list) or len(items) == 0:
+        return []
+    
+    formatted_items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+            
+        # Базовые поля
+        name = item.get('name', 'Unknown')
+        image = None
+        if image_data and name in image_data:
+            image = image_data[name]
         
-        try:
-            logger.info(f"🔍 Начинаем парсинг данных по новой структуре API")
-            
-            # Основные категории стоков из API
-            stock_categories = [
-                'easterStock',      # Пасхальный сток
-                'gearStock',        # Инструменты
-                'eggStock',         # Яйца
-                'seedsStock',       # Семена
-                # 'nightStock',     # Ночной магазин (если есть в будущем)
-                # 'honeyStock',     # Мед (если есть в будущем)
-                # 'cosmeticsStock'  # Косметика (если есть в будущем)
-            ]
-            
-            total_found = 0
-            
-            for category in stock_categories:
-                if category in data and isinstance(data[category], list):
-                    category_items = data[category]
-                    logger.info(f"📦 Обрабатываем категорию {category}: {len(category_items)} предметов")
-                    
-                    category_found = 0
-                    for item in category_items:
-                        try:
-                            if not isinstance(item, dict):
-                                continue
-                                
-                            # Получаем название предмета
-                            name = item.get('name')
-                            if not name:
-                                continue
-                                
-                            name = str(name).lower().strip()
-                            
-                            # Получаем количество (value в новой структуре)
-                            quantity = item.get('value', 0)
-                            if isinstance(quantity, str):
-                                try:
-                                    quantity = int(quantity)
-                                except ValueError:
-                                    quantity = 0
-                            
-                            # Проверяем, отслеживается ли предмет и есть ли в наличии
-                            if name in self.proctor_items and quantity > 0:
-                                stock_items[name] = quantity
-                                category_found += 1
-                                total_found += 1
-                                logger.info(f"🎯 Найден в {category}: {name} - {quantity} шт.")
-                                
-                        except Exception as e:
-                            logger.warning(f"⚠️ Ошибка обработки элемента в {category}: {e}")
+        base_item = {'name': name}
+        if image:
+            base_item['image'] = image
+        
+        # Дополнительные поля в зависимости от типа
+        if is_last_seen:
+            formatted_item = {
+                **base_item,
+                'emoji': item.get('emoji', '❓'),
+                'seen': item.get('seen')
+            }
+        else:
+            formatted_item = {
+                **base_item,
+                'value': item.get('value')
+            }
+        
+        formatted_items.append(formatted_item)
+    
+    return formatted_items
+
+def format_stocks(self, stocks_data):
+    """Форматирует стоки как в JavaScript коде"""
+    image_data = stocks_data.get('imageData', {})
+    
+    formatted = {
+        'easterStock': self.format_items(stocks_data.get('easterStock', []), image_data),
+        'gearStock': self.format_items(stocks_data.get('gearStock', []), image_data),
+        'eggStock': self.format_items(stocks_data.get('eggStock', []), image_data),
+        'nightStock': self.format_items(stocks_data.get('nightStock', []), image_data),
+        'honeyStock': self.format_items(stocks_data.get('honeyStock', []), image_data),
+        'cosmeticsStock': self.format_items(stocks_data.get('cosmeticsStock', []), image_data),
+        'seedsStock': self.format_items(stocks_data.get('seedsStock', []), image_data),
+        
+        'lastSeen': {
+            'Seeds': self.format_items(stocks_data.get('lastSeen', {}).get('Seeds', []), image_data, True),
+            'Gears': self.format_items(stocks_data.get('lastSeen', {}).get('Gears', []), image_data, True),
+            'Weather': self.format_items(stocks_data.get('lastSeen', {}).get('Weather', []), image_data, True),
+            'Eggs': self.format_items(stocks_data.get('lastSeen', {}).get('Eggs', []), image_data, True),
+            'Honey': self.format_items(stocks_data.get('lastSeen', {}).get('Honey', []), image_data, True)
+        },
+        
+        'restockTimers': stocks_data.get('restockTimers', {})
+    }
+    
+    # Сохраняем отформатированные данные для отладки
+    try:
+        with open('debug_stock_formatted.json', 'w', encoding='utf-8') as f:
+            json.dump(formatted, f, indent=2, ensure_ascii=False)
+        logger.info("💾 Отформатированные данные сохранены в debug_stock_formatted.json")
+    except:
+        pass
+        
+    return formatted
+
+def parse_formatted_stock_data(self, formatted_data):
+    """Парсит отформатированные данные стока"""
+    stock_items = {}
+    
+    try:
+        logger.info(f"🔍 Начинаем парсинг отформатированных данных")
+        
+        # Основные категории стоков
+        stock_categories = [
+            'easterStock',      # Пасхальный сток
+            'gearStock',        # Инструменты
+            'eggStock',         # Яйца
+            'nightStock',       # Ночной магазин
+            'honeyStock',       # Мед
+            'cosmeticsStock',   # Косметика
+            'seedsStock'        # Семена
+        ]
+        
+        total_found = 0
+        
+        for category in stock_categories:
+            if category in formatted_data and isinstance(formatted_data[category], list):
+                category_items = formatted_data[category]
+                logger.info(f"📦 Обрабатываем категорию {category}: {len(category_items)} предметов")
+                
+                category_found = 0
+                for item in category_items:
+                    try:
+                        if not isinstance(item, dict):
                             continue
-                    
-                    logger.info(f"✅ В категории {category} найдено {category_found} отслеживаемых предметов")
-            
-            logger.info(f"📊 ИТОГО: Найдено {total_found} отслеживаемых предметов во всех категориях")
-            return stock_items
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка парсинга данных: {e}")
-            return {}
+                            
+                        # Получаем название предмета
+                        name = item.get('name')
+                        if not name:
+                            continue
+                            
+                        name = str(name).lower().strip()
+                        
+                        # Получаем количество (value в отформатированных данных)
+                        quantity = item.get('value')
+                        if quantity is None:
+                            continue
+                            
+                        if isinstance(quantity, str):
+                            try:
+                                quantity = int(quantity)
+                            except ValueError:
+                                quantity = 0
+                        elif isinstance(quantity, (int, float)):
+                            quantity = int(quantity)
+                        else:
+                            quantity = 0
+                        
+                        # Проверяем, отслеживается ли предмет и есть ли в наличии
+                        if name in self.proctor_items and quantity > 0:
+                            stock_items[name] = quantity
+                            category_found += 1
+                            total_found += 1
+                            logger.info(f"🎯 Найден в {category}: {name} - {quantity} шт.")
+                            
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ошибка обработки элемента в {category}: {e}")
+                        continue
+                
+                logger.info(f"✅ В категории {category} найдено {category_found} отслеживаемых предметов")
+        
+        logger.info(f"📊 ИТОГО: Найдено {total_found} отслеживаемых предметов во всех категориях")
+        
+        # Логируем все доступные категории для отладки
+        logger.info(f"🔍 Доступные категории в данных: {list(formatted_data.keys())}")
+        for category in stock_categories:
+            if category in formatted_data:
+                items_count = len(formatted_data[category])
+                logger.info(f"   {category}: {items_count} предметов")
+        
+        return stock_items
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка парсинга отформатированных данных: {e}")
+        return {}
 
     def format_stock_message(self, new_items):
         """Форматирует красивое сообщение о стоке"""
