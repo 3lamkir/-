@@ -26,6 +26,7 @@ WHITELIST_FILE = 'whitelist.json'
 APPROVED_CHANNELS_FILE = 'approved_channels.json'
 STATS_FILE = 'stats.json'
 PENDING_CHANNELS_FILE = 'pending_channels.json'
+PROCTOR_FILE = 'proctor.json'
 
 # Веб-сервер для Replit
 app = Flask('')
@@ -72,39 +73,74 @@ class GardenStockBot:
             return False
 
     def load_proctor_items(self):
-        """Загружает список отслеживаемых предметов - ИСПРАВЛЕНО ДЛЯ REPLIT"""
+        """Загружает список отслеживаемых предметов из JSON"""
         try:
-            # Сначала пробуем загрузить из файла
-            if os.path.exists('proctor.txt'):
-                with open('proctor.txt', 'r', encoding='utf-8') as f:
-                    items = []
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            clean_item = ' '.join(line.split()).lower()
-                            items.append(clean_item)
-                    
-                    logger.info(f"🎯 Загружено {len(items)} предметов из proctor.txt")
-                    logger.info(f"📝 Предметы: {items}")
-                    return items
+            if os.path.exists(PROCTOR_FILE):
+                with open(PROCTOR_FILE, 'r', encoding='utf-8') as f:
+                    proctor_data = json.load(f)
+                
+                items = proctor_data.get('tracked_items', [])
+                self.check_interval = proctor_data.get('settings', {}).get('check_interval', 30)
+                
+                logger.info(f"🎯 Загружено {len(items)} предметов из proctor.json")
+                logger.info(f"📝 Предметы: {items}")
+                logger.info(f"⏰ Интервал проверки: {self.check_interval} сек.")
+                return items
             else:
-                # Если файла нет, создаем пример
-                default_items = [
-                    "seed packet",
-                    "watering can", 
-                    "garden glove",
-                    "plant food",
-                    "pruning shear"
-                ]
-                with open('proctor.txt', 'w', encoding='utf-8') as f:
-                    for item in default_items:
-                        f.write(item + '\n')
-                logger.info(f"📝 Создан файл proctor.txt с примерами предметов")
-                return default_items
+                # Создаем файл по умолчанию
+                default_data = {
+                    "tracked_items": ["corn", "cacao", "tomato", "carrot", "potato", "onion", "pumpkin"],
+                    "settings": {
+                        "check_interval": 30,
+                        "notify_all_items": False,
+                        "min_quantity": 1
+                    },
+                    "metadata": {
+                        "last_updated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "total_items": 7
+                    }
+                }
+                
+                with open(PROCTOR_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(default_data, f, ensure_ascii=False, indent=2)
+                
+                logger.info("📝 Создан файл proctor.json с настройками по умолчанию")
+                self.check_interval = 30
+                return default_data['tracked_items']
                 
         except Exception as e:
-            logger.error(f"❌ Ошибка загрузки proctor.txt: {e}")
-            return ["seed packet", "watering can"]  # Fallback items
+            logger.error(f"❌ Ошибка загрузки proctor.json: {e}")
+            self.check_interval = 30
+            return ["corn", "tomato"]
+
+    def save_proctor_items(self, items=None):
+        """Сохраняет предметы в JSON файл"""
+        try:
+            if items is None:
+                items = self.proctor_items
+            
+            proctor_data = {
+                "tracked_items": items,
+                "settings": {
+                    "check_interval": getattr(self, 'check_interval', 30),
+                    "notify_all_items": False,
+                    "min_quantity": 1
+                },
+                "metadata": {
+                    "last_updated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "total_items": len(items)
+                }
+            }
+            
+            with open(PROCTOR_FILE, 'w', encoding='utf-8') as f:
+                json.dump(proctor_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"💾 Сохранено {len(items)} предметов в proctor.json")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения proctor.json: {e}")
+            return False
 
     def is_whitelisted(self, user_id):
         """Проверяет, есть ли пользователь в белом списке"""
@@ -180,28 +216,52 @@ class GardenStockBot:
         return False
 
     async def get_real_garden_stock(self):
-        """Получает данные стока из Grow A Garden API - ИСПРАВЛЕНО ДЛЯ REPLIT"""
+        """Получает данные стока из Grow A Garden API"""
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': 'https://growagarden.gg/',
-            'Origin': 'https://growagarden.gg'
+            'Origin': 'https://growagarden.gg',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
         }
         
         try:
-            # Добавляем таймауты для Replit
-            timeout = aiohttp.ClientTimeout(total=15)
+            # Пробуем разные эндпоинты API
+            endpoints = [
+                'https://growagarden.gg/api/stock',
+                'https://growagarden.gg/api/market',
+                'https://growagarden.gg/api/items'
+            ]
+            
+            timeout = aiohttp.ClientTimeout(total=20)
             
             async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                async with session.get('https://growagarden.gg/api/stock') as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"✅ Успешно получены данные API")
-                        return self.parse_stock_data(data)
-                    else:
-                        logger.error(f"❌ Ошибка API: {response.status}")
-                        return {}
+                for endpoint in endpoints:
+                    try:
+                        logger.info(f"🔍 Пробуем эндпоинт: {endpoint}")
+                        async with session.get(endpoint) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                logger.info(f"✅ Успешно получены данные с {endpoint}")
+                                parsed_data = self.parse_stock_data(data)
+                                if parsed_data:
+                                    return parsed_data
+                            else:
+                                logger.warning(f"⚠️ Эндпоинт {endpoint} вернул статус {response.status}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ошибка с эндпоинтом {endpoint}: {e}")
+                        continue
+                
+                # Если все эндпоинты не сработали, возвращаем пустой словарь
+                logger.error("❌ Все эндпоинты API не сработали")
+                return {}
+                
         except asyncio.TimeoutError:
             logger.error("❌ Таймаут при запросе к API")
             return {}
@@ -210,45 +270,87 @@ class GardenStockBot:
             return {}
 
     def parse_stock_data(self, data):
-        """Парсит данные стока и фильтрует по proctor.txt - ИСПРАВЛЕНО"""
+        """Парсит данные стока"""
         stock_items = {}
         
         try:
-            logger.info(f"🔍 Начинаем парсинг данных...")
+            logger.info(f"🔍 Начинаем парсинг данных... Тип данных: {type(data)}")
             
-            # Разные возможные структуры ответа API
-            if isinstance(data, list):
-                # Если данные пришли как список
-                stock_data = data
-            elif 'result' in data and 'data' in data['result']:
-                # Если структура с result.data
-                stock_data = data['result']['data']
-            elif 'data' in data:
-                # Если структура с data
-                stock_data = data['data']
+            # Функция для рекурсивного поиска items в данных
+            def find_items(obj, path=""):
+                if isinstance(obj, dict):
+                    # Проверяем ключи, которые могут содержать items
+                    for key, value in obj.items():
+                        if key.lower() in ['items', 'stock', 'products', 'data']:
+                            result = find_items(value, f"{path}.{key}")
+                            if result:
+                                return result
+                        elif isinstance(value, (dict, list)):
+                            result = find_items(value, f"{path}.{key}")
+                            if result:
+                                return result
+                    return None
+                elif isinstance(obj, list):
+                    # Если это список, проверяем каждый элемент
+                    for i, item in enumerate(obj):
+                        if isinstance(item, dict):
+                            # Проверяем есть ли нужные поля
+                            if 'name' in item and 'quantity' in item:
+                                return obj
+                            elif 'title' in item and 'stock' in item:
+                                return obj
+                        result = find_items(item, f"{path}[{i}]")
+                        if result:
+                            return result
+                    return None
+                return None
+
+            # Ищем items в данных
+            items_data = find_items(data)
+            if items_data is None:
+                items_data = data  # Используем исходные данные если не нашли items
+
+            if isinstance(items_data, list):
+                stock_list = items_data
+            elif isinstance(items_data, dict) and 'data' in items_data:
+                stock_list = items_data['data']
+            elif isinstance(items_data, dict) and 'result' in items_data:
+                stock_list = items_data['result']
             else:
-                # Пробуем обработать как есть
-                stock_data = data
-            
-            if not stock_data:
+                stock_list = [items_data] if items_data else []
+
+            if not stock_list:
                 logger.warning("⚠️ Данные стока пусты")
                 return {}
                 
-            logger.info(f"📊 Обрабатываем {len(stock_data)} элементов стока")
+            logger.info(f"📊 Обрабатываем {len(stock_list)} элементов стока")
             
             found_count = 0
-            for item in stock_data:
+            for item in stock_list:
                 try:
-                    name = item.get('name', '').lower().strip()
-                    quantity = item.get('quantity', 0)
+                    # Пробуем разные варианты ключей для имени
+                    name = None
+                    quantity = 0
                     
-                    # Логируем для отладки
-                    if name in self.proctor_items:
-                        logger.info(f"🎯 Найден отслеживаемый предмет: {name} - {quantity} шт.")
+                    if isinstance(item, dict):
+                        for key in ['name', 'title', 'product', 'item']:
+                            if key in item and item[key]:
+                                name = str(item[key]).lower().strip()
+                                break
+                        
+                        # Пробуем разные варианты ключей для количества
+                        for qty_key in ['quantity', 'stock', 'count', 'amount', 'qty']:
+                            if qty_key in item:
+                                try:
+                                    quantity = int(item[qty_key])
+                                    break
+                                except (ValueError, TypeError):
+                                    continue
                     
-                    if name in self.proctor_items and quantity > 0:
+                    if name and name in self.proctor_items and quantity > 0:
                         stock_items[name] = quantity
                         found_count += 1
+                        logger.info(f"🎯 Найден отслеживаемый предмет: {name} - {quantity} шт.")
                         
                 except Exception as e:
                     logger.warning(f"⚠️ Ошибка обработки элемента: {e}")
@@ -273,10 +375,10 @@ class GardenStockBot:
         
         items_text = ""
         for item_name, quantity in new_items.items():
-            display_name = item_name.title()  # Capitalize each word
+            display_name = item_name.title()
             items_text += f"🟢 *{display_name}* — `{quantity}` шт.\n"
         
-        message = f"{title}{items_text}\n⏰ *Обновлено:* {datetime.now().strftime('%H:%M:%S')}"
+        message = f"{title}{items_text}\n⏰ *Обновлено:* {datetime.now().strftime('%H:%M:%S')}\n\n🔔 *Garden Stock Bot*"
         return message
 
     def find_new_items(self, current_stock):
@@ -292,12 +394,14 @@ class GardenStockBot:
         return new_items
 
     async def send_stock_updates(self, application, new_items):
-        """Отправляет обновления во все одобренные каналы - ИСПРАВЛЕНО"""
+        """Отправляет обновления во все одобренные каналы"""
         if not new_items:
+            logger.info("ℹ️ Нет новых предметов для отправки")
             return
             
         message = self.format_stock_message(new_items)
         if not message:
+            logger.warning("⚠️ Не удалось сформировать сообщение")
             return
             
         sent_count = 0
@@ -309,7 +413,17 @@ class GardenStockBot:
             try:
                 logger.info(f"🔄 Пытаемся отправить в канал: {channel_info['title']} (ID: {channel_id})")
                 
-                # Пытаемся отправить сообщение
+                # Пробуем отправить тестовое сообщение сначала
+                try:
+                    await application.bot.send_message(
+                        chat_id=channel_id, 
+                        text="🔔 *Garden Stock Bot подключен!* Ожидайте уведомлений о новых предметах...",
+                        parse_mode='Markdown'
+                    )
+                except:
+                    pass
+                
+                # Отправляем основное сообщение
                 sent_message = await application.bot.send_message(
                     chat_id=channel_id, 
                     text=message, 
@@ -321,14 +435,14 @@ class GardenStockBot:
                 sent_count += 1
                 
                 logger.info(f"✅ Сообщение отправлено в канал {channel_info['title']}")
-                await asyncio.sleep(1)  # Задержка между отправками
+                await asyncio.sleep(2)  # Задержка между отправками
                 
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"❌ Ошибка отправки в канал {channel_id}: {error_msg}")
                 
-                # Если бот не в канале или нет прав, удаляем канал из одобренных
-                if "Chat not found" in error_msg or "bot is not a member" in error_msg or "Forbidden" in error_msg:
+                # Проверяем тип ошибки
+                if any(err in error_msg for err in ["Chat not found", "bot is not a member", "Forbidden", "unauthorized"]):
                     failed_channels.append(channel_id)
                     logger.warning(f"🗑️ Удаляем канал {channel_id} из одобренных")
         
@@ -342,7 +456,7 @@ class GardenStockBot:
             logger.info(f"📊 Итог отправки: {sent_count} успешно, {len(failed_channels)} неудачно")
 
     async def check_stock_loop(self, application):
-        """Основной цикл проверки стока - УЛУЧШЕННАЯ ВЕРСИЯ"""
+        """Основной цикл проверки стока с настраиваемым интервалом"""
         logger.info("🔄 Запущен цикл проверки стока")
         
         check_count = 0
@@ -350,35 +464,45 @@ class GardenStockBot:
         
         while True:
             try:
-                if error_count > 5:
-                    logger.warning("🔄 Перезапуск цикла проверки из-за множественных ошибок")
-                    error_count = 0
+                current_interval = getattr(self, 'check_interval', 30)
+                logger.info(f"🔍 Проверка стока #{check_count + 1} (интервал: {current_interval}сек)")
                 
                 current_stock = await self.get_real_garden_stock()
                 
                 if current_stock:
+                    logger.info(f"📊 Получен сток: {len(current_stock)} предметов")
+                    
+                    # Логируем все найденные предметы для отладки
+                    for item_name, quantity in current_stock.items():
+                        status = "🎯 ОТСЛЕЖИВАЕТСЯ" if item_name in self.proctor_items else "👀 В стоке"
+                        logger.info(f"  {status}: {item_name} - {quantity} шт.")
+                    
                     new_items = self.find_new_items(current_stock)
                     
                     if new_items:
                         logger.info(f"🎁 Найдены новые предметы: {list(new_items.keys())}")
                         await self.send_stock_updates(application, new_items)
-                        error_count = 0  # Сбрасываем счетчик ошибок при успехе
+                        error_count = 0
                     else:
                         check_count += 1
-                        if check_count % 10 == 0:  # Логируем каждые 10 проверок
-                            logger.info("🔍 Проверка стока - новых предметов нет")
-                            logger.info(f"📊 Текущий сток: {len(current_stock)} предметов")
+                        if check_count % 3 == 0:  # Логируем каждые 3 проверки
+                            tracked_in_stock = [item for item in self.proctor_items if item in current_stock]
+                            logger.info(f"🔍 Новых предметов нет. В стоке отслеживаемых: {len(tracked_in_stock)}/{len(self.proctor_items)}")
+                            
                 else:
                     logger.warning("⚠️ Не удалось получить данные стока")
                     error_count += 1
+                    if error_count > 3:
+                        logger.error("🔄 Перезапускаем цикл проверки из-за множественных ошибок")
+                        return await self.check_stock_loop(application)
                 
-                # Ждем перед следующей проверкой
-                await asyncio.sleep(30)
+                # Используем настраиваемый интервал
+                await asyncio.sleep(current_interval)
                 
             except Exception as e:
                 logger.error(f"❌ Ошибка в цикле проверки: {e}")
                 error_count += 1
-                await asyncio.sleep(60)  # Увеличиваем задержку при ошибках
+                await asyncio.sleep(60)
 
     def get_bot_stats(self):
         """Получает статистику бота"""
@@ -396,6 +520,7 @@ class GardenStockBot:
 👥 Администраторов: {len(self.whitelist)}
 🎯 Отслеживаемых предметов: {len(self.proctor_items)}
 ⏳ Заявок на рассмотрении: {len(self.pending_channels)}
+⏰ Интервал проверки: {getattr(self, 'check_interval', 30)} сек.
 
 🟢 Статус: Активен
 🕒 Последняя проверка: {datetime.now().strftime('%H:%M:%S')}
@@ -410,24 +535,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
     user_id = user.id
-    username = user.username or user.first_name
     
     if not bot.is_whitelisted(user_id):
         welcome_text = f"""
-🌿 Добро пожаловать, {username}! 🌿
+🌿 Добро пожаловать, {user.first_name}! 🌿
 
 🤖 *Garden Stock Bot* - автоматический отслеживатель стока предметов в игре *Grow A Garden*.
 
-✨ *Что умеет бот:*
-• Автоматически проверяет сток каждые 30 секунд
-• Отправляет уведомления только о новых предметах
-• Работает 24/7 и не пропустит ни одного обновления
+✨ *Функции:*
+• Автоматическая проверка стока
+• Уведомления о новых предметах  
+• Работа 24/7
 
-📝 *Как подать заявку на подключение:*
-Просто используйте команду /request и следуйте инструкциям!
+📝 *Подключить канал:* /request
 
-❌ *У вас нет доступа к управлению ботом.*
-*Для подачи заявки используйте команду /request*
+❓ *Помощь:* Нажмите кнопку ниже
         """
         keyboard = [
             [InlineKeyboardButton("📋 Подать заявку", callback_data="make_request")],
@@ -437,35 +559,46 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
         return
         
-    # Приветствие для администратора
+    # Для администратора - ПОЛНЫЙ СПИСОК КОМАНД
     admin_welcome = f"""
-🌟 Добро пожаловать, администратор {username}! 🌟
+🌟 Добро пожаловать, администратор {user.first_name}! 🌟
 
-🤖 Garden Stock Bot готов к работе!
+🤖 *Garden Stock Bot* готов к работе!
 
-📊 Текущая статистика:
+📊 *Текущая статистика:*
 • Каналов одобрено: {len(bot.approved_channels)}
 • Предметов отслеживается: {len(bot.proctor_items)}
 • Заявок на рассмотрении: {len(bot.pending_channels)}
+• Интервал проверки: {getattr(bot, 'check_interval', 30)} сек.
 
-🛠 Доступные команды:
+🛠 *ПОЛНЫЙ СПИСОК КОМАНД:*
 
-📈 Информация:
+📈 *Информация:*
 /stats - Подробная статистика
 /channels - Одобренные каналы  
 /pending - Заявки на одобрение
+/proctor - Отслеживаемые предметы
 
-⚙️ Управление:
+⚙️ *Управление каналами:*
 /approve <ID> - Одобрить канал
 /reject <ID> - Отклонить канал
+
+👥 *Управление администраторами:*
 /addadmin <ID> - Добавить админа
 /removeadmin <ID> - Удалить админа
 /listadmins - Список админов
 
-❓ Помощь:
-/help - Полный список команд
+🎯 *Управление предметами:*
+/additem <название> - Добавить предмет
+/removeitem <название> - Удалить предмет
+/setinterval <секунды> - Интервал проверки
 
-💡 Бот уже работает и отслеживает сток!
+❓ *Помощь:*
+/help - Полный список команд
+/teststock - Тест проверки стока
+/testmessage - Тест отправки сообщения
+
+💡 *Бот уже работает и отслеживает сток каждые {getattr(bot, 'check_interval', 30)} секунд!*
     """
     
     stats = bot.get_bot_stats()
@@ -475,69 +608,47 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда для подачи заявки на подключение канала"""
     user = update.effective_user
-    user_id = user.id
-    
-    # Создаем уникальный ID для заявки
-    request_id = int(time.time())
     
     instruction_text = f"""
-📨 ФОРМА ЗАЯВКИ НА ПОДКЛЮЧЕНИЕ
+📨 ЗАЯВКА НА ПОДКЛЮЧЕНИЕ КАНАЛА
 
 👤 *Заявитель:* {user.first_name}
-🆔 *ID:* `{user_id}`
-📋 *ID заявки:* `{request_id}`
+🆔 *ID:* `{user.id}`
 
-📝 *Инструкция по подаче заявки:*
+📝 *Инструкция:*
 
-1. *Добавьте бота в ваш канал* как администратора:
-   - Права на отправку сообщений
-   - Права на удаление сообщений
+1. *Добавьте бота в канал* как администратора с правами:
+   - ✅ Отправка сообщений
+   - ✅ Удаление сообщений
 
-2. *Пришлите сюда:*
-   - Название вашего канала
-   - ID канала (если знаете)
-   - Ссылку-приглашение в канал
+2. *Пришлите данные канала:*
+   - Название канала
+   - ID канала (если известен)  
+   - Ссылка-приглашение
 
-3. *Пример заполнения:*
-
-⏳ *После отправки данных заявка будет рассмотрена в течение 24 часов*
-
-💡 *Как найти ID канала:*
-• Добавьте @username_to_id_bot в канал
-• Или перешлите сообщение из канала боту @userinfobot
+3. *Формат:*
+    
+⏳ *Рассмотрение в течение 24 часов*
     """
     
-    # Сохраняем информацию о том, что пользователь начал заполнять заявку
     context.user_data['making_request'] = True
-    context.user_data['request_id'] = request_id
     
-    keyboard = [
-        [InlineKeyboardButton("❌ Отменить заявку", callback_data="cancel_request")]
-    ]
+    keyboard = [[InlineKeyboardButton("❌ Отменить", callback_data="cancel_request")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(instruction_text, reply_markup=reply_markup)
 
 async def handle_request_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает данные заявки от пользователя"""
+    """Обрабатывает данные заявки"""
     user = update.effective_user
-    user_id = user.id
     text = update.message.text
     
-    # Проверяем, заполняет ли пользователь заявку
     if not context.user_data.get('making_request'):
         return
     
-    # Парсим данные заявки
+    # Парсим данные
     lines = text.split('\n')
-    channel_data = {
-        'name': '',
-        'id': '',
-        'link': '',
-        'user_id': user_id,
-        'username': user.first_name,
-        'request_time': time.time()
-    }
+    channel_data = {'name': '', 'id': '', 'link': ''}
     
     for line in lines:
         line = line.strip()
@@ -548,74 +659,55 @@ async def handle_request_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         elif 't.me/' in line or 'https://' in line:
             channel_data['link'] = line.strip()
     
-    # Проверяем, что все обязательные поля заполнены
     if not channel_data['name']:
-        await update.message.reply_text("❌ Пожалуйста, укажите название канала в формате:\n`Название: Ваше название канала`")
+        await update.message.reply_text("❌ Укажите название канала: `Название: Ваше название`")
         return
     
     # Создаем заявку
-    request_id = context.user_data.get('request_id', int(time.time()))
+    request_id = int(time.time())
     channel_id = channel_data['id'] or f"pending_{request_id}"
+    invited_by = f"{user.first_name} (ID: {user.id})"
     
-    # Добавляем заявку в ожидание
-    invited_by = f"{user.first_name} (ID: {user_id})"
     if bot.add_pending_channel(channel_id, channel_data['name'], invited_by, channel_data['link']):
-        # Очищаем данные пользователя
         context.user_data.pop('making_request', None)
-        context.user_data.pop('request_id', None)
         
-        # Подтверждаем пользователю
         success_text = f"""
-✅ ЗАЯВКА УСПЕШНО ПОДАНА!
+✅ ЗАЯВКА ПОДАНА!
 
-📋 *Данные заявки:*
+📋 *Данные:*
 • Название: {channel_data['name']}
 • ID: `{channel_id}`
 • Ссылка: {channel_data['link'] or 'Не указана'}
-• Номер заявки: `{request_id}`
 
-⏳ *Заявка будет рассмотрена администраторами в течение 24 часов.*
-
-💬 *Статус заявки можно уточнить у администратора.*
+⏳ *Ожидайте рассмотрения администраторами.*
         """
         
         await update.message.reply_text(success_text)
         
         # Уведомляем администраторов
         notification_text = f"""
-📨 НОВАЯ ЗАЯВКА НА ПОДКЛЮЧЕНИЕ!
+📨 НОВАЯ ЗАЯВКА!
 
-📋 *Данные заявки:*
-• Название: {channel_data['name']}
-• ID: `{channel_id}`
-• Ссылка: {channel_data['link'] or 'Не указана'}
-• Заявитель: {user.first_name}
-• ID заявителя: `{user_id}`
-• Номер заявки: `{request_id}`
+📢 {channel_data['name']}
+🆔 `{channel_id}`
+👤 {user.first_name} (`{user.id}`)
 
-💬 *Для рассмотрения заявки используйте:*
-/pending
+/pending - для рассмотрения
         """
         
         for admin_id in bot.whitelist:
             try:
-                await context.bot.send_message(
-                    chat_id=int(admin_id),
-                    text=notification_text
-                )
+                await context.bot.send_message(int(admin_id), notification_text)
             except Exception as e:
-                logger.error(f"❌ Не удалось уведомить администратора {admin_id}: {e}")
+                logger.error(f"❌ Не удалось уведомить {admin_id}: {e}")
                 
-        logger.info(f"✅ Новая заявка от {user.first_name}: {channel_data['name']}")
-        
     else:
-        await update.message.reply_text("❌ Произошла ошибка при создании заявки. Попробуйте еще раз.")
+        await update.message.reply_text("❌ Ошибка при создании заявки.")
 
 async def cancel_request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отменяет заполнение заявки"""
     if context.user_data.get('making_request'):
         context.user_data.pop('making_request', None)
-        context.user_data.pop('request_id', None)
         await update.message.reply_text("❌ Заполнение заявки отменено.")
     else:
         await update.message.reply_text("ℹ️ У вас нет активных заявок для отмены.")
@@ -682,7 +774,7 @@ async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if not bot.is_whitelisted(user_id):
-        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        await update.message.reply_text("❌ Нет доступа.")
         return
         
     if not context.args:
@@ -697,18 +789,30 @@ async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     channel_info = bot.pending_channels[channel_id]
     
+    # Пробуем присоединиться к каналу если есть ссылка
+    if channel_info.get('invite_link'):
+        try:
+            await context.bot.join_chat(channel_info['invite_link'])
+            logger.info(f"✅ Бот присоединился к каналу {channel_info['title']}")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось присоединиться: {e}")
+            await update.message.reply_text(f"⚠️ Не удалось присоединиться к каналу: {e}")
+    
     if bot.add_approved_channel(channel_id, channel_info['title'], f"user_{user_id}"):
         bot.remove_pending_channel(channel_id)
         
-        # Пытаемся присоединиться к каналу если есть ссылка
-        if channel_info.get('invite_link'):
-            try:
-                await context.bot.join_chat(channel_info['invite_link'])
-                logger.info(f"✅ Бот присоединился к каналу {channel_info['title']}")
-            except Exception as e:
-                logger.warning(f"⚠️ Не удалось присоединиться к каналу: {e}")
+        # Отправляем тестовое сообщение в канал
+        try:
+            await context.bot.send_message(
+                chat_id=channel_id,
+                text="✅ *Garden Stock Bot подключен!*\n\n🔔 Теперь вы будете получать уведомления о новых предметах в стоке игры Grow A Garden!",
+                parse_mode='Markdown'
+            )
+            logger.info(f"✅ Тестовое сообщение отправлено в {channel_info['title']}")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось отправить тестовое сообщение: {e}")
         
-        await update.message.reply_text(f"✅ Канал успешно одобрен!\n\n📢 {channel_info['title']}")
+        await update.message.reply_text(f"✅ Канал одобрен!\n\n📢 {channel_info['title']}\n🆔 `{channel_id}`")
     else:
         await update.message.reply_text("❌ Ошибка при одобрении канала.")
 
@@ -737,104 +841,158 @@ async def reject_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Ошибка при отклонении канала.")
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик inline кнопок"""
-    query = update.callback_query
-    user = query.from_user
-    user_id = user.id
+async def proctor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает текущие отслеживаемые предметы"""
+    user_id = update.effective_user.id
     
-    data = query.data
-    
-    if data == "make_request":
-        await query.message.reply_text("📝 Используйте команду /request для подачи заявки на подключение канала.")
-        await query.answer()
-        return
-        
-    elif data == "help_public":
-        help_text = """
-❓ ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ:
-
-🤖 *Что делает бот?*
-- Отслеживает появление предметов в игре Grow A Garden
-- Автоматически уведомляет каналы о новых предметах
-- Работает 24/7
-
-📝 *Как подать заявку?*
-- Используйте команду /request
-- Следуйте инструкциям в форме заявки
-- Ожидайте одобрения администраторами
-
-⏰ *Как часто проверяется сток?*
-- Каждые 30 секунд
-
-📨 *Куда приходят уведомления?*
-- В одобренные каналы
-
-🔧 *По вопросам подключения:* используйте команду /request
-        """
-        await query.message.reply_text(help_text)
-        await query.answer()
-        return
-        
-    elif data == "cancel_request":
-        if context.user_data.get('making_request'):
-            context.user_data.pop('making_request', None)
-            context.user_data.pop('request_id', None)
-            await query.message.edit_text("❌ Заполнение заявки отменено.")
-        else:
-            await query.answer("ℹ️ У вас нет активных заявок для отмены.")
-        return
-    
-    # Остальная логика для администраторов
     if not bot.is_whitelisted(user_id):
-        await query.answer("❌ У вас нет доступа!", show_alert=True)
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
         return
         
-    await query.answer()
+    items_text = "🎯 ОТСЛЕЖИВАЕМЫЕ ПРЕДМЕТЫ:\n\n"
+    for i, item in enumerate(bot.proctor_items, 1):
+        items_text += f"{i}. `{item}`\n"
     
-    if data.startswith('approve:'):
-        channel_id = data.split(':')[1]
+    items_text += f"\n📊 Всего предметов: {len(bot.proctor_items)}"
+    items_text += f"\n⏰ Интервал проверки: {getattr(bot, 'check_interval', 30)} сек."
+    
+    await update.message.reply_text(items_text)
+
+async def add_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Добавляет предмет для отслеживания"""
+    user_id = update.effective_user.id
+    
+    if not bot.is_whitelisted(user_id):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
         
-        if channel_id in bot.pending_channels:
-            channel_info = bot.pending_channels[channel_id]
-            
-            if bot.add_approved_channel(channel_id, channel_info['title'], f"user_{user_id}"):
-                bot.remove_pending_channel(channel_id)
-                
-                # Пытаемся присоединиться к каналу если есть ссылка
-                if channel_info.get('invite_link'):
-                    try:
-                        await context.bot.join_chat(channel_info['invite_link'])
-                        logger.info(f"✅ Бот присоединился к каналу {channel_info['title']}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Не удалось присоединиться к каналу: {e}")
-                
-                await query.edit_message_text(
-                    f"✅ Канал успешно одобрен!\n\n"
-                    f"📢 {channel_info['title']}\n"
-                    f"🆔 `{channel_id}`"
-                )
-            else:
-                await query.edit_message_text("❌ Ошибка при одобрении канала.")
-        else:
-            await query.edit_message_text("❌ Канал уже обработан или не найден!")
-            
-    elif data.startswith('reject:'):
-        channel_id = data.split(':')[1]
+    if not context.args:
+        await update.message.reply_text("❌ Использование: /additem <название предмета>")
+        return
         
-        if channel_id in bot.pending_channels:
-            channel_info = bot.pending_channels[channel_id]
-            
-            if bot.remove_pending_channel(channel_id):
-                await query.edit_message_text(
-                    f"❌ Запрос отклонен.\n\n"
-                    f"📢 {channel_info['title']}\n"
-                    f"🆔 `{channel_id}`"
-                )
-            else:
-                await query.edit_message_text("❌ Ошибка при отклонении канала.")
-        else:
-            await query.edit_message_text("❌ Канал уже обработан или не найден!")
+    item_name = ' '.join(context.args).lower().strip()
+    
+    if item_name in bot.proctor_items:
+        await update.message.reply_text(f"❌ Предмет `{item_name}` уже отслеживается.")
+        return
+        
+    bot.proctor_items.append(item_name)
+    
+    if bot.save_proctor_items():
+        await update.message.reply_text(f"✅ Предмет `{item_name}` добавлен для отслеживания!")
+        logger.info(f"✅ Добавлен предмет для отслеживания: {item_name}")
+    else:
+        await update.message.reply_text("❌ Ошибка при сохранении предмета.")
+
+async def remove_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет предмет из отслеживания"""
+    user_id = update.effective_user.id
+    
+    if not bot.is_whitelisted(user_id):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+        
+    if not context.args:
+        await update.message.reply_text("❌ Использование: /removeitem <название предмета>")
+        return
+        
+    item_name = ' '.join(context.args).lower().strip()
+    
+    if item_name not in bot.proctor_items:
+        await update.message.reply_text(f"❌ Предмет `{item_name}` не найден в списке отслеживания.")
+        return
+        
+    bot.proctor_items.remove(item_name)
+    
+    if bot.save_proctor_items():
+        await update.message.reply_text(f"✅ Предмет `{item_name}` удален из отслеживания!")
+        logger.info(f"✅ Удален предмет из отслеживания: {item_name}")
+    else:
+        await update.message.reply_text("❌ Ошибка при удалении предмета.")
+
+async def set_interval_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Устанавливает интервал проверки стока"""
+    user_id = update.effective_user.id
+    
+    if not bot.is_whitelisted(user_id):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+        
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /setinterval <секунды>")
+        return
+        
+    interval = int(context.args[0])
+    
+    if interval < 10:
+        await update.message.reply_text("❌ Интервал не может быть меньше 10 секунд.")
+        return
+        
+    if interval > 300:
+        await update.message.reply_text("❌ Интервал не может быть больше 300 секунд.")
+        return
+        
+    bot.check_interval = interval
+    bot.save_proctor_items()
+    
+    await update.message.reply_text(f"✅ Интервал проверки установлен: {interval} секунд")
+    logger.info(f"⏰ Установлен интервал проверки: {interval} сек.")
+
+async def test_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тестовая команда для проверки стока"""
+    user_id = update.effective_user.id
+    
+    if not bot.is_whitelisted(user_id):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+        
+    await update.message.reply_text("🔍 Запускаю тестовую проверку стока...")
+    
+    current_stock = await bot.get_real_garden_stock()
+    
+    if current_stock:
+        stock_text = "📊 ТЕКУЩИЙ СТОК:\n\n"
+        for item_name, quantity in current_stock.items():
+            status = "🎯" if item_name in bot.proctor_items else "👀"
+            stock_text += f"{status} `{item_name}` - {quantity} шт.\n"
+        
+        tracked_count = len([item for item in bot.proctor_items if item in current_stock])
+        stock_text += f"\n📈 Отслеживаемых в стоке: {tracked_count}/{len(bot.proctor_items)}"
+        
+        await update.message.reply_text(stock_text)
+    else:
+        await update.message.reply_text("❌ Не удалось получить данные стока")
+
+async def test_message_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тестовая команда для отправки сообщения"""
+    user_id = update.effective_user.id
+    
+    if not bot.is_whitelisted(user_id):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+        
+    if not context.args:
+        await update.message.reply_text("❌ Использование: /testmessage <channel_id>")
+        return
+        
+    channel_id = context.args[0]
+    
+    try:
+        test_message = "🧪 *ТЕСТОВОЕ СООБЩЕНИЕ*\n\nЭто тестовая отправка от Garden Stock Bot. Если вы видите это сообщение, бот работает корректно!"
+        
+        await context.bot.send_message(
+            chat_id=channel_id,
+            text=test_message,
+            parse_mode='Markdown'
+        )
+        
+        await update.message.reply_text(f"✅ Тестовое сообщение отправлено в канал `{channel_id}`")
+        logger.info(f"✅ Тестовое сообщение отправлено в {channel_id}")
+        
+    except Exception as e:
+        error_msg = f"❌ Ошибка отправки тестового сообщения: {e}"
+        await update.message.reply_text(error_msg)
+        logger.error(error_msg)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает справку по командам"""
@@ -859,35 +1017,42 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(help_text)
         return
         
-    # Помощь для администраторов
+    # Помощь для администраторов - ПОЛНЫЙ СПИСОК
     help_text = """
-🌿 GARDEN STOCK BOT - КОМАНДЫ АДМИНИСТРАТОРА 🌿
+🌿 GARDEN STOCK BOT - ПОЛНЫЙ СПИСОК КОМАНД 🌿
 
 📊 ИНФОРМАЦИЯ:
-/start - Главное меню и приветствие
-/stats - Подробная статистика бота
-/channels - Список одобренных каналов
-/pending - Заявки на одобрение
+/start - Главное меню
+/stats - Статистика бота
+/channels - Одобренные каналы
+/pending - Заявки на рассмотрение
+/proctor - Отслеживаемые предметы
 
 ⚙️ УПРАВЛЕНИЕ КАНАЛАМИ:
-/approve <ID> - Одобрить канал по ID
-/reject <ID> - Отклонить канал по ID
+/approve <ID> - Одобрить канал
+/reject <ID> - Отклонить канал
 
 👥 УПРАВЛЕНИЕ АДМИНИСТРАТОРАМИ:
 /addadmin <ID> - Добавить администратора
 /removeadmin <ID> - Удалить администратора
 /listadmins - Список администраторов
 
-❓ ПОМОЩЬ:
-/help - Показать эту справку
+🎯 УПРАВЛЕНИЕ ПРЕДМЕТАМИ:
+/additem <название> - Добавить предмет для отслеживания
+/removeitem <название> - Удалить предмет из отслеживания
+/setinterval <секунды> - Установить интервал проверки
+
+🧪 ТЕСТОВЫЕ КОМАНДЫ:
+/teststock - Проверить текущий сток
+/testmessage <ID> - Отправить тестовое сообщение
 
 📝 ПРОЦЕСС ПОДКЛЮЧЕНИЯ:
 1. Пользователь использует /request
 2. Заполняет форму заявки
 3. Администратор проверяет заявки через /pending
-4. Одобряет/отклоняет через кнопки
+4. Одобряет/отклоняет через кнопки или команды
 
-💡 Бот автоматически отслеживает сток каждые 30 секунд!
+💡 Бот автоматически отслеживает сток!
     """
     await update.message.reply_text(help_text)
 
@@ -952,13 +1117,109 @@ async def list_admins_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await update.message.reply_text(admins_list)
 
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик inline кнопок"""
+    query = update.callback_query
+    user = query.from_user
+    data = query.data
+    
+    await query.answer()
+    
+    if data == "make_request":
+        await query.message.reply_text("📝 Используйте /request для подачи заявки")
+        return
+        
+    elif data == "help_public":
+        help_text = """
+❓ ПОМОЩЬ:
+
+🤖 *Функции бота:*
+- Отслеживает сток предметов в Grow A Garden
+- Уведомляет о новых предметах
+- Работает 24/7
+
+📝 *Как подключить канал?*
+- Используйте /request
+- Следуйте инструкциям
+- Ожидайте одобрения
+
+⏰ *Проверка стока:* каждые 30 секунд
+        """
+        await query.message.reply_text(help_text)
+        return
+        
+    elif data == "cancel_request":
+        if context.user_data.get('making_request'):
+            context.user_data.pop('making_request', None)
+            await query.message.edit_text("❌ Заявка отменена.")
+        return
+    
+    # Проверяем права для административных действий
+    if not bot.is_whitelisted(user.id):
+        await query.answer("❌ Нет доступа!", show_alert=True)
+        return
+        
+    if data.startswith('approve:'):
+        channel_id = data.split(':')[1]
+        
+        if channel_id in bot.pending_channels:
+            channel_info = bot.pending_channels[channel_id]
+            
+            # Пробуем присоединиться к каналу
+            if channel_info.get('invite_link'):
+                try:
+                    await context.bot.join_chat(channel_info['invite_link'])
+                    logger.info(f"✅ Бот присоединился к {channel_info['title']}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось присоединиться: {e}")
+            
+            if bot.add_approved_channel(channel_id, channel_info['title'], f"user_{user.id}"):
+                bot.remove_pending_channel(channel_id)
+                
+                # Отправляем тестовое сообщение
+                try:
+                    await context.bot.send_message(
+                        chat_id=channel_id,
+                        text="✅ *Garden Stock Bot подключен!*\n\nОжидайте уведомлений о новых предметах!",
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось отправить тестовое сообщение: {e}")
+                
+                await query.edit_message_text(
+                    f"✅ Канал одобрен!\n\n"
+                    f"📢 {channel_info['title']}\n"
+                    f"🆔 `{channel_id}`"
+                )
+            else:
+                await query.edit_message_text("❌ Ошибка при одобрении.")
+        else:
+            await query.edit_message_text("❌ Канал не найден!")
+            
+    elif data.startswith('reject:'):
+        channel_id = data.split(':')[1]
+        
+        if channel_id in bot.pending_channels:
+            channel_info = bot.pending_channels[channel_id]
+            
+            if bot.remove_pending_channel(channel_id):
+                await query.edit_message_text(
+                    f"❌ Запрос отклонен.\n\n"
+                    f"📢 {channel_info['title']}\n"
+                    f"🆔 `{channel_id}`"
+                )
+            else:
+                await query.edit_message_text("❌ Ошибка при отклонении.")
+        else:
+            await query.edit_message_text("❌ Канал не найден!")
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок"""
     logger.error(f"❌ Ошибка: {context.error}", exc_info=context.error)
 
 def setup_handlers(application):
     """Настраивает обработчики команд"""
-    # Команды
+    # Основные команды
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("request", request_command))
     application.add_handler(CommandHandler("cancelrequest", cancel_request_command))
@@ -968,9 +1229,21 @@ def setup_handlers(application):
     application.add_handler(CommandHandler("approve", approve_command))
     application.add_handler(CommandHandler("reject", reject_command))
     application.add_handler(CommandHandler("help", help_command))
+    
+    # Команды управления администраторами
     application.add_handler(CommandHandler("addadmin", add_admin_command))
     application.add_handler(CommandHandler("removeadmin", remove_admin_command))
     application.add_handler(CommandHandler("listadmins", list_admins_command))
+    
+    # Новые команды управления предметами
+    application.add_handler(CommandHandler("proctor", proctor_command))
+    application.add_handler(CommandHandler("additem", add_item_command))
+    application.add_handler(CommandHandler("removeitem", remove_item_command))
+    application.add_handler(CommandHandler("setinterval", set_interval_command))
+    
+    # Тестовые команды
+    application.add_handler(CommandHandler("teststock", test_stock_command))
+    application.add_handler(CommandHandler("testmessage", test_message_command))
     
     # Обработчик данных заявки
     application.add_handler(MessageHandler(
@@ -1016,6 +1289,7 @@ def main():
         logger.info(f"   - Отслеживаемых предметов: {len(bot.proctor_items)}")
         logger.info(f"   - Одобренных каналов: {len(bot.approved_channels)}")
         logger.info(f"   - Заявок на рассмотрении: {len(bot.pending_channels)}")
+        logger.info(f"   - Интервал проверки: {getattr(bot, 'check_interval', 30)} сек.")
         
         # Запускаем polling
         application.run_polling()
