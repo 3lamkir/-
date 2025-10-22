@@ -83,7 +83,6 @@ class GardenStockBot:
                 self.check_interval = proctor_data.get('settings', {}).get('check_interval', 30)
                 
                 logger.info(f"🎯 Загружено {len(items)} предметов из proctor.json")
-                logger.info(f"📝 Предметы: {items}")
                 logger.info(f"⏰ Интервал проверки: {self.check_interval} сек.")
                 return items
             else:
@@ -270,76 +269,65 @@ class GardenStockBot:
             return {}
 
     def parse_stock_data(self, data):
-        """Парсит данные стока - УПРОЩЕННАЯ ВЕРСИЯ"""
+        """Парсит данные стока по новой структуре API"""
         stock_items = {}
         
         try:
-            logger.info(f"🔍 Начинаем парсинг данных API...")
+            logger.info(f"🔍 Начинаем парсинг данных по новой структуре API")
             
-            # Пробуем разные возможные структуры ответа
-            stock_list = None
+            # Основные категории стоков из API
+            stock_categories = [
+                'easterStock',      # Пасхальный сток
+                'gearStock',        # Инструменты
+                'eggStock',         # Яйца
+                'seedsStock',       # Семена
+                # 'nightStock',     # Ночной магазин (если есть в будущем)
+                # 'honeyStock',     # Мед (если есть в будущем)
+                # 'cosmeticsStock'  # Косметика (если есть в будущем)
+            ]
             
-            if isinstance(data, list):
-                stock_list = data
-            elif isinstance(data, dict):
-                if 'result' in data and 'data' in data['result']:
-                    stock_list = data['result']['data']
-                elif 'data' in data:
-                    stock_list = data['data']
+            total_found = 0
             
-            if not stock_list:
-                logger.warning("⚠️ Не найдена структура с данными стока")
-                # Попробуем найти items в любой структуре
-                if isinstance(data, dict):
-                    for key, value in data.items():
-                        if isinstance(value, list) and len(value) > 0:
-                            if isinstance(value[0], dict) and 'name' in value[0]:
-                                stock_list = value
-                                break
-            
-            if not stock_list:
-                logger.error("❌ Не удалось найти данные стока в ответе API")
-                return {}
-                
-            logger.info(f"📊 Обрабатываем {len(stock_list)} элементов стока")
-            
-            found_count = 0
-            for item in stock_list:
-                try:
-                    if not isinstance(item, dict):
-                        continue
-                        
-                    # Получаем название предмета
-                    name = None
-                    for name_key in ['name', 'title', 'itemName']:
-                        if name_key in item and item[name_key]:
-                            name = str(item[name_key]).lower().strip()
-                            break
+            for category in stock_categories:
+                if category in data and isinstance(data[category], list):
+                    category_items = data[category]
+                    logger.info(f"📦 Обрабатываем категорию {category}: {len(category_items)} предметов")
                     
-                    if not name:
-                        continue
-                    
-                    # Получаем количество
-                    quantity = 0
-                    for qty_key in ['quantity', 'stock', 'count', 'amount', 'qty', 'stockQuantity']:
-                        if qty_key in item:
-                            try:
-                                quantity = int(item[qty_key])
-                                break
-                            except (ValueError, TypeError):
+                    category_found = 0
+                    for item in category_items:
+                        try:
+                            if not isinstance(item, dict):
                                 continue
+                                
+                            # Получаем название предмета
+                            name = item.get('name')
+                            if not name:
+                                continue
+                                
+                            name = str(name).lower().strip()
+                            
+                            # Получаем количество (value в новой структуре)
+                            quantity = item.get('value', 0)
+                            if isinstance(quantity, str):
+                                try:
+                                    quantity = int(quantity)
+                                except ValueError:
+                                    quantity = 0
+                            
+                            # Проверяем, отслеживается ли предмет и есть ли в наличии
+                            if name in self.proctor_items and quantity > 0:
+                                stock_items[name] = quantity
+                                category_found += 1
+                                total_found += 1
+                                logger.info(f"🎯 Найден в {category}: {name} - {quantity} шт.")
+                                
+                        except Exception as e:
+                            logger.warning(f"⚠️ Ошибка обработки элемента в {category}: {e}")
+                            continue
                     
-                    # Проверяем, отслеживается ли предмет и есть ли в наличии
-                    if name in self.proctor_items and quantity > 0:
-                        stock_items[name] = quantity
-                        found_count += 1
-                        logger.info(f"🎯 Найден отслеживаемый предмет: {name} - {quantity} шт.")
-                        
-                except Exception as e:
-                    logger.warning(f"⚠️ Ошибка обработки элемента: {e}")
-                    continue
-                    
-            logger.info(f"✅ Найдено {found_count} отслеживаемых предметов в стоке")
+                    logger.info(f"✅ В категории {category} найдено {category_found} отслеживаемых предметов")
+            
+            logger.info(f"📊 ИТОГО: Найдено {total_found} отслеживаемых предметов во всех категориях")
             return stock_items
             
         except Exception as e:
@@ -502,7 +490,11 @@ class GardenStockBot:
 # Создаем экземпляр бота
 bot = GardenStockBot()
 
+# ... (все остальные функции и обработчики остаются без изменений)
+# [Здесь должен быть весь остальной код из предыдущей версии - команды start, request, stats, channels, pending, approve, reject, proctor, additem, removeitem, setinterval, teststock, testmessage, help, addadmin, removeadmin, listadmins, button_handler, error_handler, setup_handlers, start_stock_checker, main]
+
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
+# [Вставь сюда все команды из предыдущего кода которые шли после класса GardenStockBot]
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
