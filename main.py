@@ -227,200 +227,200 @@ class GardenStockBot:
                 return True
         return False
 
-async def get_real_garden_stock(self):
-    """Get real stock data from Grow A Garden API - NEW VERSION"""
-    
-    headers = {
-        'accept': '*/*',
-        'accept-language': 'en-US,en;q=0.9',
-        'content-type': 'application/json',
-        'priority': 'u=1, i',
-        'referer': 'https://growagarden.gg/stocks',
-        'trpc-accept': 'application/json',
-        'x-trpc-source': 'gag',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-    
-    try:
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            async with session.get('https://growagarden.gg/api/stock') as response:
-                if response.status == 200:
-                    raw_data = await response.json()
-                    logger.info(f"✅ Успешно получены сырые данные API")
-                    
-                    # Сохраняем сырые данные для отладки
-                    try:
-                        with open('debug_stock_raw.json', 'w', encoding='utf-8') as f:
-                            json.dump(raw_data, f, indent=2, ensure_ascii=False)
-                        logger.info("💾 Сырые данные сохранены в debug_stock_raw.json")
-                    except:
-                        pass
-                    
-                    # Форматируем данные как в JavaScript коде
-                    formatted_data = self.format_stocks(raw_data)
-                    return self.parse_formatted_stock_data(formatted_data)
-                else:
-                    logger.error(f"❌ Ошибка API: {response.status}")
-                    return {}
-    except asyncio.TimeoutError:
-        logger.error("❌ Таймаут при запросе к API")
-        return {}
-    except Exception as e:
-        logger.error(f"❌ Ошибка получения стока: {e}")
-        return {}
+    async def get_real_garden_stock(self):
+        """Get real stock data from Grow A Garden API - NEW VERSION"""
+        
+        headers = {
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'content-type': 'application/json',
+            'priority': 'u=1, i',
+            'referer': 'https://growagarden.gg/stocks',
+            'trpc-accept': 'application/json',
+            'x-trpc-source': 'gag',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                async with session.get('https://growagarden.gg/api/stock') as response:
+                    if response.status == 200:
+                        raw_data = await response.json()
+                        logger.info(f"✅ Успешно получены сырые данные API")
+                        
+                        # Сохраняем сырые данные для отладки
+                        try:
+                            with open('debug_stock_raw.json', 'w', encoding='utf-8') as f:
+                                json.dump(raw_data, f, indent=2, ensure_ascii=False)
+                            logger.info("💾 Сырые данные сохранены в debug_stock_raw.json")
+                        except:
+                            pass
+                        
+                        # Форматируем данные как в JavaScript коде
+                        formatted_data = self.format_stocks(raw_data)
+                        return self.parse_formatted_stock_data(formatted_data)
+                    else:
+                        logger.error(f"❌ Ошибка API: {response.status}")
+                        return {}
+        except asyncio.TimeoutError:
+            logger.error("❌ Таймаут при запросе к API")
+            return {}
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения стока: {e}")
+            return {}
 
-def format_items(self, items, image_data=None, is_last_seen=False):
-    """Форматирует items как в JavaScript коде"""
-    if not isinstance(items, list) or len(items) == 0:
-        return []
-    
-    formatted_items = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
+    def format_items(self, items, image_data=None, is_last_seen=False):
+        """Форматирует items как в JavaScript коде"""
+        if not isinstance(items, list) or len(items) == 0:
+            return []
+        
+        formatted_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+                
+            # Базовые поля
+            name = item.get('name', 'Unknown')
+            image = None
+            if image_data and name in image_data:
+                image = image_data[name]
             
-        # Базовые поля
-        name = item.get('name', 'Unknown')
-        image = None
-        if image_data and name in image_data:
-            image = image_data[name]
+            base_item = {'name': name}
+            if image:
+                base_item['image'] = image
+            
+            # Дополнительные поля в зависимости от типа
+            if is_last_seen:
+                formatted_item = {
+                    **base_item,
+                    'emoji': item.get('emoji', '❓'),
+                    'seen': item.get('seen')
+                }
+            else:
+                formatted_item = {
+                    **base_item,
+                    'value': item.get('value')
+                }
+            
+            formatted_items.append(formatted_item)
         
-        base_item = {'name': name}
-        if image:
-            base_item['image'] = image
-        
-        # Дополнительные поля в зависимости от типа
-        if is_last_seen:
-            formatted_item = {
-                **base_item,
-                'emoji': item.get('emoji', '❓'),
-                'seen': item.get('seen')
-            }
-        else:
-            formatted_item = {
-                **base_item,
-                'value': item.get('value')
-            }
-        
-        formatted_items.append(formatted_item)
-    
-    return formatted_items
+        return formatted_items
 
-def format_stocks(self, stocks_data):
-    """Форматирует стоки как в JavaScript коде"""
-    image_data = stocks_data.get('imageData', {})
-    
-    formatted = {
-        'easterStock': self.format_items(stocks_data.get('easterStock', []), image_data),
-        'gearStock': self.format_items(stocks_data.get('gearStock', []), image_data),
-        'eggStock': self.format_items(stocks_data.get('eggStock', []), image_data),
-        'nightStock': self.format_items(stocks_data.get('nightStock', []), image_data),
-        'honeyStock': self.format_items(stocks_data.get('honeyStock', []), image_data),
-        'cosmeticsStock': self.format_items(stocks_data.get('cosmeticsStock', []), image_data),
-        'seedsStock': self.format_items(stocks_data.get('seedsStock', []), image_data),
+    def format_stocks(self, stocks_data):
+        """Форматирует стоки как в JavaScript коде"""
+        image_data = stocks_data.get('imageData', {})
         
-        'lastSeen': {
-            'Seeds': self.format_items(stocks_data.get('lastSeen', {}).get('Seeds', []), image_data, True),
-            'Gears': self.format_items(stocks_data.get('lastSeen', {}).get('Gears', []), image_data, True),
-            'Weather': self.format_items(stocks_data.get('lastSeen', {}).get('Weather', []), image_data, True),
-            'Eggs': self.format_items(stocks_data.get('lastSeen', {}).get('Eggs', []), image_data, True),
-            'Honey': self.format_items(stocks_data.get('lastSeen', {}).get('Honey', []), image_data, True)
-        },
+        formatted = {
+            'easterStock': self.format_items(stocks_data.get('easterStock', []), image_data),
+            'gearStock': self.format_items(stocks_data.get('gearStock', []), image_data),
+            'eggStock': self.format_items(stocks_data.get('eggStock', []), image_data),
+            'nightStock': self.format_items(stocks_data.get('nightStock', []), image_data),
+            'honeyStock': self.format_items(stocks_data.get('honeyStock', []), image_data),
+            'cosmeticsStock': self.format_items(stocks_data.get('cosmeticsStock', []), image_data),
+            'seedsStock': self.format_items(stocks_data.get('seedsStock', []), image_data),
+            
+            'lastSeen': {
+                'Seeds': self.format_items(stocks_data.get('lastSeen', {}).get('Seeds', []), image_data, True),
+                'Gears': self.format_items(stocks_data.get('lastSeen', {}).get('Gears', []), image_data, True),
+                'Weather': self.format_items(stocks_data.get('lastSeen', {}).get('Weather', []), image_data, True),
+                'Eggs': self.format_items(stocks_data.get('lastSeen', {}).get('Eggs', []), image_data, True),
+                'Honey': self.format_items(stocks_data.get('lastSeen', {}).get('Honey', []), image_data, True)
+            },
+            
+            'restockTimers': stocks_data.get('restockTimers', {})
+        }
         
-        'restockTimers': stocks_data.get('restockTimers', {})
-    }
-    
-    # Сохраняем отформатированные данные для отладки
-    try:
-        with open('debug_stock_formatted.json', 'w', encoding='utf-8') as f:
-            json.dump(formatted, f, indent=2, ensure_ascii=False)
-        logger.info("💾 Отформатированные данные сохранены в debug_stock_formatted.json")
-    except:
-        pass
-        
-    return formatted
+        # Сохраняем отформатированные данные для отладки
+        try:
+            with open('debug_stock_formatted.json', 'w', encoding='utf-8') as f:
+                json.dump(formatted, f, indent=2, ensure_ascii=False)
+            logger.info("💾 Отформатированные данные сохранены в debug_stock_formatted.json")
+        except:
+            pass
+            
+        return formatted
 
-def parse_formatted_stock_data(self, formatted_data):
-    """Парсит отформатированные данные стока"""
-    stock_items = {}
-    
-    try:
-        logger.info(f"🔍 Начинаем парсинг отформатированных данных")
+    def parse_formatted_stock_data(self, formatted_data):
+        """Парсит отформатированные данные стока"""
+        stock_items = {}
         
-        # Основные категории стоков
-        stock_categories = [
-            'easterStock',      # Пасхальный сток
-            'gearStock',        # Инструменты
-            'eggStock',         # Яйца
-            'nightStock',       # Ночной магазин
-            'honeyStock',       # Мед
-            'cosmeticsStock',   # Косметика
-            'seedsStock'        # Семена
-        ]
-        
-        total_found = 0
-        
-        for category in stock_categories:
-            if category in formatted_data and isinstance(formatted_data[category], list):
-                category_items = formatted_data[category]
-                logger.info(f"📦 Обрабатываем категорию {category}: {len(category_items)} предметов")
-                
-                category_found = 0
-                for item in category_items:
-                    try:
-                        if not isinstance(item, dict):
-                            continue
+        try:
+            logger.info(f"🔍 Начинаем парсинг отформатированных данных")
+            
+            # Основные категории стоков
+            stock_categories = [
+                'easterStock',      # Пасхальный сток
+                'gearStock',        # Инструменты
+                'eggStock',         # Яйца
+                'nightStock',       # Ночной магазин
+                'honeyStock',       # Мед
+                'cosmeticsStock',   # Косметика
+                'seedsStock'        # Семена
+            ]
+            
+            total_found = 0
+            
+            for category in stock_categories:
+                if category in formatted_data and isinstance(formatted_data[category], list):
+                    category_items = formatted_data[category]
+                    logger.info(f"📦 Обрабатываем категорию {category}: {len(category_items)} предметов")
+                    
+                    category_found = 0
+                    for item in category_items:
+                        try:
+                            if not isinstance(item, dict):
+                                continue
+                                
+                            # Получаем название предмета
+                            name = item.get('name')
+                            if not name:
+                                continue
+                                
+                            name = str(name).lower().strip()
                             
-                        # Получаем название предмета
-                        name = item.get('name')
-                        if not name:
-                            continue
-                            
-                        name = str(name).lower().strip()
-                        
-                        # Получаем количество (value в отформатированных данных)
-                        quantity = item.get('value')
-                        if quantity is None:
-                            continue
-                            
-                        if isinstance(quantity, str):
-                            try:
+                            # Получаем количество (value в отформатированных данных)
+                            quantity = item.get('value')
+                            if quantity is None:
+                                continue
+                                
+                            if isinstance(quantity, str):
+                                try:
+                                    quantity = int(quantity)
+                                except ValueError:
+                                    quantity = 0
+                            elif isinstance(quantity, (int, float)):
                                 quantity = int(quantity)
-                            except ValueError:
+                            else:
                                 quantity = 0
-                        elif isinstance(quantity, (int, float)):
-                            quantity = int(quantity)
-                        else:
-                            quantity = 0
-                        
-                        # Проверяем, отслеживается ли предмет и есть ли в наличии
-                        if name in self.proctor_items and quantity > 0:
-                            stock_items[name] = quantity
-                            category_found += 1
-                            total_found += 1
-                            logger.info(f"🎯 Найден в {category}: {name} - {quantity} шт.")
                             
-                    except Exception as e:
-                        logger.warning(f"⚠️ Ошибка обработки элемента в {category}: {e}")
-                        continue
-                
-                logger.info(f"✅ В категории {category} найдено {category_found} отслеживаемых предметов")
-        
-        logger.info(f"📊 ИТОГО: Найдено {total_found} отслеживаемых предметов во всех категориях")
-        
-        # Логируем все доступные категории для отладки
-        logger.info(f"🔍 Доступные категории в данных: {list(formatted_data.keys())}")
-        for category in stock_categories:
-            if category in formatted_data:
-                items_count = len(formatted_data[category])
-                logger.info(f"   {category}: {items_count} предметов")
-        
-        return stock_items
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка парсинга отформатированных данных: {e}")
-        return {}
+                            # Проверяем, отслеживается ли предмет и есть ли в наличии
+                            if name in self.proctor_items and quantity > 0:
+                                stock_items[name] = quantity
+                                category_found += 1
+                                total_found += 1
+                                logger.info(f"🎯 Найден в {category}: {name} - {quantity} шт.")
+                                
+                        except Exception as e:
+                            logger.warning(f"⚠️ Ошибка обработки элемента в {category}: {e}")
+                            continue
+                    
+                    logger.info(f"✅ В категории {category} найдено {category_found} отслеживаемых предметов")
+            
+            logger.info(f"📊 ИТОГО: Найдено {total_found} отслеживаемых предметов во всех категориях")
+            
+            # Логируем все доступные категории для отладки
+            logger.info(f"🔍 Доступные категории в данных: {list(formatted_data.keys())}")
+            for category in stock_categories:
+                if category in formatted_data:
+                    items_count = len(formatted_data[category])
+                    logger.info(f"   {category}: {items_count} предметов")
+            
+            return stock_items
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка парсинга отформатированных данных: {e}")
+            return {}
 
     def format_stock_message(self, new_items):
         """Форматирует красивое сообщение о стоке"""
@@ -444,12 +444,20 @@ def parse_formatted_stock_data(self, formatted_data):
         """Находит новые предметы по сравнению с предыдущей проверкой"""
         new_items = {}
         
+        logger.info(f"🔍 Поиск новых предметов. Текущий сток: {len(current_stock)} предметов")
+        logger.info(f"📋 Текущие предметы: {list(current_stock.keys())}")
+        logger.info(f"📋 Предыдущий сток: {list(self.last_stock.keys())}")
+        
         for item_name, quantity in current_stock.items():
             if item_name not in self.last_stock:
                 new_items[item_name] = quantity
-                logger.info(f"🆕 Новый предмет обнаружен: {item_name} - {quantity} шт.")
+                logger.info(f"🆕 НОВЫЙ ПРЕДМЕТ ОБНАРУЖЕН: {item_name} - {quantity} шт.")
+            else:
+                logger.info(f"🔁 Предмет уже был: {item_name} - {quantity} шт.")
                 
         self.last_stock = current_stock.copy()
+        
+        logger.info(f"🎯 ИТОГО новых предметов: {len(new_items)}")
         return new_items
 
     async def send_stock_updates(self, application, new_items):
@@ -521,28 +529,36 @@ def parse_formatted_stock_data(self, formatted_data):
                 if current_stock:
                     logger.info(f"📊 Получен сток: {len(current_stock)} предметов")
                     
-                    # Логируем все найденные предметы для отладки
-                    for item_name, quantity in current_stock.items():
-                        status = "🎯 ОТСЛЕЖИВАЕТСЯ" if item_name in self.proctor_items else "👀 В стоке"
-                        logger.info(f"  {status}: {item_name} - {quantity} шт.")
+                    # Детальное логирование всех предметов
+                    if current_stock:
+                        logger.info("📝 ДЕТАЛЬНЫЙ ОТЧЕТ О СТОКЕ:")
+                        for item_name, quantity in current_stock.items():
+                            status = "🎯 ОТСЛЕЖИВАЕТСЯ" if item_name in self.proctor_items else "👀 В стоке"
+                            logger.info(f"  {status}: {item_name} - {quantity} шт.")
                     
                     new_items = self.find_new_items(current_stock)
                     
                     if new_items:
                         logger.info(f"🎁 Найдены новые предметы: {list(new_items.keys())}")
+                        logger.info(f"📨 Начинаю отправку в {len(self.approved_channels)} каналов")
                         await self.send_stock_updates(application, new_items)
                         error_count = 0
                     else:
                         check_count += 1
-                        if check_count % 3 == 0:  # Логируем каждые 3 проверки
+                        logger.info(f"🔍 Проверка #{check_count} - новых предметов нет")
+                        
+                        # Логируем каждые 5 проверок
+                        if check_count % 5 == 0:
                             tracked_in_stock = [item for item in self.proctor_items if item in current_stock]
-                            logger.info(f"🔍 Новых предметов нет. В стоке отслеживаемых: {len(tracked_in_stock)}/{len(self.proctor_items)}")
+                            logger.info(f"📈 Статистика: В стоке отслеживаемых: {len(tracked_in_stock)}/{len(self.proctor_items)}")
                             
                 else:
                     logger.warning("⚠️ Не удалось получить данные стока")
                     error_count += 1
                     if error_count > 3:
                         logger.error("🔄 Перезапускаем цикл проверки из-за множественных ошибок")
+                        # Сбрасываем last_stock при перезапуске
+                        self.last_stock = {}
                         return await self.check_stock_loop(application)
                 
                 # Используем настраиваемый интервал
@@ -578,11 +594,7 @@ def parse_formatted_stock_data(self, formatted_data):
 # Создаем экземпляр бота
 bot = GardenStockBot()
 
-# ... (все остальные функции и обработчики остаются без изменений)
-# [Здесь должен быть весь остальной код из предыдущей версии - команды start, request, stats, channels, pending, approve, reject, proctor, additem, removeitem, setinterval, teststock, testmessage, help, addadmin, removeadmin, listadmins, button_handler, error_handler, setup_handlers, start_stock_checker, main]
-
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
-# [Вставь сюда все команды из предыдущего кода которые шли после класса GardenStockBot]
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -646,10 +658,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /removeitem <название> - Удалить предмет
 /setinterval <секунды> - Интервал проверки
 
+🧪 *Тестовые команды:*
+/teststock - Тест проверки стока
+/testmessage <ID> - Тест отправки сообщения
+/resetstock - Сбросить память о стоке
+
 ❓ *Помощь:*
 /help - Полный список команд
-/teststock - Тест проверки стока
-/testmessage - Тест отправки сообщения
 
 💡 *Бот уже работает и отслеживает сток каждые {getattr(bot, 'check_interval', 30)} секунд!*
     """
@@ -680,7 +695,7 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
    - Ссылка-приглашение
 
 3. *Формат:*
-    
+
 ⏳ *Рассмотрение в течение 24 часов*
     """
     
@@ -1047,6 +1062,18 @@ async def test_message_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(error_msg)
         logger.error(error_msg)
 
+async def reset_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сбрасывает память о предыдущем стоке"""
+    user_id = update.effective_user.id
+    
+    if not bot.is_whitelisted(user_id):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+        
+    bot.last_stock = {}
+    await update.message.reply_text("✅ Память о предыдущем стоке сброшена! Следующая проверка покажет все предметы как новые.")
+    logger.info("🔄 Память о стоке сброшена администратором")
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает справку по командам"""
     user_id = update.effective_user.id
@@ -1098,6 +1125,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🧪 ТЕСТОВЫЕ КОМАНДЫ:
 /teststock - Проверить текущий сток
 /testmessage <ID> - Отправить тестовое сообщение
+/resetstock - Сбросить память о стоке
 
 📝 ПРОЦЕСС ПОДКЛЮЧЕНИЯ:
 1. Пользователь использует /request
@@ -1297,6 +1325,7 @@ def setup_handlers(application):
     # Тестовые команды
     application.add_handler(CommandHandler("teststock", test_stock_command))
     application.add_handler(CommandHandler("testmessage", test_message_command))
+    application.add_handler(CommandHandler("resetstock", reset_stock_command))
     
     # Обработчик данных заявки
     application.add_handler(MessageHandler(
